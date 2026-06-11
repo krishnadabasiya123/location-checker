@@ -7,7 +7,10 @@ import 'package:intl/intl.dart';
 import 'package:location_checker/ClockInOut/dummyData.dart';
 import 'package:location_checker/UpdatedWithInternet/Cubit/cubit/clock_in_out_cubit.dart';
 import 'package:location_checker/UpdatedWithInternet/LocalRepository/clockInOutLocalStorage.dart';
+import 'package:location_checker/UpdatedWithInternet/LocalRepository/clockInOutSyncManager.dart';
+import 'package:location_checker/UpdatedWithInternet/LocalRepository/location_service.dart';
 import 'package:location_checker/UpdatedWithInternet/Screen/ClockInOutScreen.dart';
+import 'package:location_checker/UpdatedWithInternet/Utils/hive_utils.dart';
 export 'package:flutter_bloc/flutter_bloc.dart';
 
 class MyAppNew extends StatelessWidget {
@@ -49,6 +52,59 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   bool isClockedIn = false;
 
   final LocalRepository _localRepository = LocalRepository();
+
+  // --- Real-time Hive Database Inspector State ---
+  int _todayLocationsCount = 0;
+  List<Map<String, dynamic>> _todayLocationsList = [];
+  int _totalSessionsCount = 0;
+  bool _isHiveSummaryLoaded = false;
+
+  Future<void> _loadHiveSummary() async {
+    try {
+      final clockBox = await Hive.openBox('clokINOutData');
+      final locBox = await Hive.openBox('locationdata');
+
+      // 1. Calculate total session entries across all dates in clokINOutData box
+      int sessionsCount = 0;
+      for (final key in clockBox.keys) {
+        final List<dynamic> entries = List<dynamic>.from(
+          clockBox.get(key) ?? [],
+        );
+        sessionsCount += entries.length;
+      }
+
+      // 2. Fetch today's location counts and recent coordinates list
+      int locationsCount = 0;
+      List<Map<String, dynamic>> locationsList = [];
+      if (locBox.containsKey(todayStr)) {
+        final Map<dynamic, dynamic> todayData = Map<dynamic, dynamic>.from(
+          locBox.get(todayStr) ?? {},
+        );
+        final List<dynamic> locationList = List<dynamic>.from(
+          todayData['location'] ?? [],
+        );
+        locationsCount = locationList.length;
+
+        // Map to List<Map<String, dynamic>> and reverse to show latest first
+        locationsList = locationList
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList()
+            .reversed
+            .toList();
+      }
+
+      if (mounted) {
+        setState(() {
+          _totalSessionsCount = sessionsCount;
+          _todayLocationsCount = locationsCount;
+          _todayLocationsList = locationsList;
+          _isHiveSummaryLoaded = true;
+        });
+      }
+    } catch (e) {
+      print("Error loading Hive summary: $e");
+    }
+  }
 
   @override
   void initState() {
@@ -201,7 +257,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         }
       }
       _updateDisplayStamps(box);
-      await box.close();
+      // await box.close();
     } catch (e) {
       print("Error checking clock status: $e");
     }
@@ -255,46 +311,55 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           Colors.red.shade700,
         );
       }
-      await box.close();
+      // await box.close();
     } catch (e) {
       print("Error clocking in/out: $e");
       _showSnackBar("Error: $e", Colors.red.shade700);
     }
   }
 
-  // --- Sync Today's Dummy Location Data ---
   Future<void> _syncDataToServer() async {
     _showSnackBar(
-      "Syncing data to local Hive database...",
+      "Syncing large test dataset (5000+ coordinates total)...",
       Colors.blue.shade700,
     );
     try {
-      final box = await Hive.openBox('locationdata');
+      final clockBox = await Hive.openBox('clokINOutData');
+      final locBox = await Hive.openBox('locationdata');
 
-      if (!box.containsKey(todayStr)) {
-        await box.put(todayStr, locationData);
-
-        print(
-          "Stored location data for key '$todayStr' in Hive box 'locationdata': $locationData",
-        );
-        _showSnackBar(
-          "Successfully synced today's data ($todayStr) to Hive!",
-          Colors.teal.shade700,
-        );
-      } else {
-        print(
-          "Data for key '$todayStr' already exists in Hive box 'locationdata'!",
-        );
-        _showSnackBar(
-          "Data for today ($todayStr) already exists in Hive!",
-          Colors.orange.shade700,
-        );
+      // 1. Populate largeSessionData
+      for (final dateKey in largeSessionData.keys) {
+        await clockBox.put(dateKey, largeSessionData[dateKey]);
       }
-      await box.close();
+
+      // 2. Populate getLargeLocationData()
+      final largeLocData = getLargeLocationData();
+      for (final dateKey in largeLocData.keys) {
+        await locBox.put(dateKey, largeLocData[dateKey]);
+      }
+
+      // --- Refresh UI Immediately ---
+      if (clockBox.containsKey(todayStr)) {
+        final List<dynamic> todayEntries = List<dynamic>.from(
+          clockBox.get(todayStr) ?? [],
+        );
+        if (todayEntries.isNotEmpty) {
+          final lastEntry = Map<String, dynamic>.from(todayEntries.last);
+          _isClockedInNotifier.value = (lastEntry['type'] == 'in');
+        }
+        _updateDisplayStamps(clockBox);
+      }
+
+      print("Successfully seeded both Hive boxes with dummy datasets!");
+      _showSnackBar(
+        "Seeded 5000+ records in both Hive boxes successfully!",
+        Colors.teal.shade700,
+      );
     } catch (e) {
       print("Error syncing to Hive: $e");
       _showSnackBar("Failed to sync: $e", Colors.red.shade700);
     }
+    //ClockInOutSyncManager().triggerSync();
   }
 
   // --- Add a Random Location Coordinate ---
@@ -317,11 +382,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           12.0 + (random.nextDouble() * 5.0); // 12.0 to 17.0
       final double randomLong =
           77.0 + (random.nextDouble() * 5.0); // 77.0 to 82.0
-      final timeStr = DateFormat('hh:mm:ss.SSS a').format(DateTime.now());
-
       final newLocEntry = {
         "date": todayStr,
-        "time": timeStr,
+        "time": DateTime.now().millisecondsSinceEpoch,
         "lat": double.parse(randomLat.toStringAsFixed(4)),
         "long": double.parse(randomLong.toStringAsFixed(4)),
       };
@@ -336,8 +399,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         "Added Location: ${newLocEntry['lat']}, ${newLocEntry['long']}",
         Colors.teal.shade700,
       );
-
-      await box.close();
+      // await box.close();
     } catch (e) {
       print("Error adding random location: $e");
       _showSnackBar("Failed to add location: $e", Colors.red.shade700);
@@ -350,8 +412,29 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       final dateBox = await Hive.openBox('clokINOutData');
       final locBox = await Hive.openBox('locationdata');
 
-      final clokINOutData = dateBox.toMap();
-      final locData = locBox.toMap();
+      // Helper to recursively convert Map keys to String so JsonEncoder can serialize it safely.
+      Map<String, dynamic> stringifyKeys(Map<dynamic, dynamic> map) {
+        return map.map((key, value) {
+          final stringKey = key.toString();
+          if (value is Map) {
+            return MapEntry(stringKey, stringifyKeys(value));
+          } else if (value is List) {
+            return MapEntry(
+              stringKey,
+              value.map((item) {
+                if (item is Map) {
+                  return stringifyKeys(item);
+                }
+                return item;
+              }).toList(),
+            );
+          }
+          return MapEntry(stringKey, value);
+        });
+      }
+
+      final clokINOutData = stringifyKeys(dateBox.toMap());
+      final locData = stringifyKeys(locBox.toMap());
 
       final combinedData = {
         "clokINOutData": clokINOutData,
@@ -485,8 +568,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           },
         );
       }
-      await dateBox.close();
-      await locBox.close();
+      // await dateBox.close();
+      // await locBox.close();
     } catch (e) {
       print("Error reading Hive: $e");
     }
@@ -497,11 +580,11 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     try {
       final dateBox = await Hive.openBox('clokINOutData');
       await dateBox.clear();
-      await dateBox.close();
+      // await dateBox.close();
 
       final locBox = await Hive.openBox('locationdata');
       await locBox.clear();
-      await locBox.close();
+      // await locBox.close();
 
       _isClockedInNotifier.value = false;
       _todayClockInTimeNotifier.value = "--:--";
@@ -518,295 +601,479 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A), // Slate 900 Background
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              // --- Header / Title ---
-              const SizedBox(height: 10),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.workspace_premium_rounded,
-                    color: Colors.blue.shade400,
-                    size: 28,
-                  ),
-                  const SizedBox(width: 8),
-                  const Text(
-                    "Work Tracker Pro",
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                      color: Colors.white,
-                      letterSpacing: 0.8,
+        child: SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 24.0,
+              vertical: 16.0,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // --- Header / Title ---
+                const SizedBox(height: 10),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.workspace_premium_rounded,
+                      color: Colors.blue.shade400,
+                      size: 28,
                     ),
-                  ),
-                ],
-              ),
+                    const SizedBox(width: 8),
+                    const Text(
+                      "Work Tracker Pro",
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                  ],
+                ),
 
-              const SizedBox(height: 10),
+                const SizedBox(height: 16),
 
-              SizedBox(
-                width: double.infinity,
-                height: 54,
-                child: ElevatedButton.icon(
-                  onPressed: _addRandomLocation,
-                  icon: const Icon(Icons.add_location_alt_rounded, size: 20),
-                  label: const Text(
-                    "GENERATE RANDOM LOCATION",
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                      letterSpacing: 0.5,
-                    ),
+                // --- Dynamic Clock & Date Card ---
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 16,
+                    horizontal: 20,
                   ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.teal.shade600,
-                    foregroundColor: Colors.white,
-                    elevation: 2,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1E293B).withOpacity(0.4),
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: Colors.white.withOpacity(0.04)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 8,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      ValueListenableBuilder<String>(
+                        valueListenable: _timeStringNotifier,
+                        builder: (context, timeStr, child) {
+                          return Text(
+                            timeStr,
+                            style: const TextStyle(
+                              fontSize: 30,
+                              fontWeight: FontWeight.w900,
+                              color: Colors.white,
+                              letterSpacing: 1.0,
+                              shadows: [
+                                Shadow(
+                                  color: Color(0x400EA5E9),
+                                  blurRadius: 10,
+                                  offset: Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 4),
+                      ValueListenableBuilder<String>(
+                        valueListenable: _dateStringNotifier,
+                        builder: (context, dateStr, child) {
+                          return Text(
+                            dateStr.toUpperCase(),
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue.shade400,
+                              letterSpacing: 1.2,
+                            ),
+                          );
+                        },
+                      ),
+                    ],
                   ),
                 ),
-              ),
 
-              const SizedBox(height: 20),
+                BlocProvider(
+                  create: (context) =>
+                      ClockInOutCubit(LocalRepository())..checkStatus(),
+                  child: BlocConsumer<ClockInOutCubit, ClockInOutState>(
+                    listener: (context, state) async {
+                      if (state is ClockInOutFailure) {
+                        _showSnackBar(state.error, Colors.red);
+                      } else if (state is ClockInOutSuccess) {
+                        _isClockedInNotifier.value = state.isClockedIn;
 
-              BlocProvider(
-                create: (context) =>
-                    ClockInOutCubit(LocalRepository())..getClockInStatus(),
+                        try {
+                          final box = await Hive.openBox('clokINOutData');
+                          _updateDisplayStamps(box);
+                        } catch (e) {
+                          print("Error updating display stamps: $e");
+                        }
 
-                child: BlocConsumer<ClockInOutCubit, ClockInOutState>(
-                  listener: (context, state) {
-                    if (state is ClockInOutFailure) {
-                      _showSnackBar(state.error, Colors.red);
-                    }
-                  },
+                        // ONLY SHOW SNACKBAR IF IT WAS A USER CLICK
+                        if (state.isUserAction) {
+                          _showSnackBar(
+                            state.isClockedIn
+                                ? "Clocked In successfully!"
+                                : "Clocked Out successfully!",
+                            state.isClockedIn ? Colors.teal : Colors.redAccent,
+                          );
+                        }
+                      }
+                    },
+                    builder: (context, state) {
+                      final isLoading = state is ClockInOutLoading;
+                      bool isClockedIn = false;
 
-                  builder: (context, state) {
-                    final isLoading = state is ClockInOutLoading;
+                      if (state is ClockInOutSuccess) {
+                        isClockedIn = state.isClockedIn;
+                      }
 
-                    bool isClockedIn = false;
-
-                    if (state is ClockInOutSuccess) {
-                      isClockedIn = state.isClockedIn;
-                    }
-
-                    return GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-
-                      onTap: isLoading
-                          ? null
-                          : () {
-                              context.read<ClockInOutCubit>().setClockInOut(
-                                isClockedIn: isClockedIn,
-                              );
-                            },
-
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 300),
-
-                        width: 200,
-                        height: 200,
-
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: const Color(0xFF1E293B),
-
-                          border: Border.all(
-                            color: isClockedIn
-                                ? const Color(0xFFF43F5E)
-                                : const Color(0xFF10B981),
-                            width: 6,
-                          ),
-
-                          boxShadow: [
-                            BoxShadow(
-                              color:
-                                  (isClockedIn
-                                          ? const Color(0xFFF43F5E)
-                                          : const Color(0xFF10B981))
-                                      .withOpacity(0.3),
-
-                              blurRadius: 30,
-                              spreadRadius: 8,
-                            ),
-                          ],
-                        ),
-
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-
-                          children: [
-                            Icon(
-                              Icons.fingerprint_rounded,
-                              size: 64,
+                      return GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: isLoading
+                            ? null
+                            : () {
+                                context.read<ClockInOutCubit>().setClockInOut(
+                                  isClockedIn: isClockedIn,
+                                );
+                              },
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 300),
+                          width: 170,
+                          height: 170,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: const Color(0xFF1E293B),
+                            border: Border.all(
                               color: isClockedIn
                                   ? const Color(0xFFF43F5E)
                                   : const Color(0xFF10B981),
+                              width: 6,
                             ),
-
-                            const SizedBox(height: 12),
-
-                            isLoading
-                                ? const CircularProgressIndicator()
-                                : Text(
-                                    isClockedIn ? "CLOCK OUT" : "CLOCK IN",
-
-                                    style: TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.w800,
-
-                                      color: isClockedIn
-                                          ? const Color(0xFFF43F5E)
-                                          : const Color(0xFF10B981),
-
-                                      letterSpacing: 1.5,
+                            boxShadow: [
+                              BoxShadow(
+                                color:
+                                    (isClockedIn
+                                            ? const Color(0xFFF43F5E)
+                                            : const Color(0xFF10B981))
+                                        .withOpacity(0.3),
+                                blurRadius: 24,
+                                spreadRadius: 6,
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.fingerprint_rounded,
+                                size: 56,
+                                color: isClockedIn
+                                    ? const Color(0xFFF43F5E)
+                                    : const Color(0xFF10B981),
+                              ),
+                              const SizedBox(height: 10),
+                              isLoading
+                                  ? const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : Text(
+                                      isClockedIn ? "CLOCK OUT" : "CLOCK IN",
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w800,
+                                        color: isClockedIn
+                                            ? const Color(0xFFF43F5E)
+                                            : const Color(0xFF10B981),
+                                        letterSpacing: 1.5,
+                                      ),
                                     ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // --- Today's Clock In/Out display ---
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1E293B),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.white.withOpacity(0.05)),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      ValueListenableBuilder<String>(
+                        valueListenable: _todayClockInTimeNotifier,
+                        builder: (context, clockInTime, child) {
+                          return _buildMetricColumn(
+                            "CLOCK IN",
+                            clockInTime,
+                            Icons.login_rounded,
+                            Colors.teal,
+                          );
+                        },
+                      ),
+                      Container(width: 1, height: 36, color: Colors.white10),
+                      ValueListenableBuilder<String>(
+                        valueListenable: _todayClockOutTimeNotifier,
+                        builder: (context, clockOutTime, child) {
+                          return _buildMetricColumn(
+                            "CLOCK OUT",
+                            clockOutTime,
+                            Icons.logout_rounded,
+                            Colors.redAccent,
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+
+                // --- Test & Control Panel ---
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(18),
+                  margin: const EdgeInsets.only(top: 16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1E293B).withOpacity(0.4),
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: Colors.white.withOpacity(0.04)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.bug_report_rounded,
+                            color: Colors.amber.shade500,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 8),
+                          const Text(
+                            "TEST & DATA UTILITIES",
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 1.0,
+                              color: Colors.white70,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+
+                      // Primary Utility Row
+                      Row(
+                        children: [
+                          Expanded(
+                            child: SizedBox(
+                              height: 48,
+                              child: ElevatedButton.icon(
+                                onPressed: _syncDataToServer,
+                                icon: const Icon(
+                                  Icons.cloud_sync_rounded,
+                                  size: 18,
+                                ),
+                                label: const Text(
+                                  "SEED 10K DATA",
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 11,
                                   ),
-                          ],
-                        ),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.blue.shade600,
+                                  foregroundColor: Colors.white,
+                                  elevation: 1,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: SizedBox(
+                              height: 48,
+                              child: ElevatedButton.icon(
+                                onPressed: _addRandomLocation,
+                                icon: const Icon(
+                                  Icons.add_location_alt_rounded,
+                                  size: 18,
+                                ),
+                                label: const Text(
+                                  "GENERATE GPS",
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.teal.shade600,
+                                  foregroundColor: Colors.white,
+                                  elevation: 1,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    );
-                  },
-                ),
-              ),
 
-              const SizedBox(height: 20),
+                      const SizedBox(height: 10),
 
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1E293B),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.white.withOpacity(0.05)),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    ValueListenableBuilder<String>(
-                      valueListenable: _todayClockInTimeNotifier,
-                      builder: (context, clockInTime, child) {
-                        return _buildMetricColumn(
-                          "CLOCK IN",
-                          clockInTime,
-                          Icons.login_rounded,
-                          Colors.teal,
-                        );
-                      },
-                    ),
-                    Container(
-                      width: 1,
-                      height: 40,
-                      color: Colors.black.withOpacity(0.2),
-                    ),
-                    ValueListenableBuilder<String>(
-                      valueListenable: _todayClockOutTimeNotifier,
-                      builder: (context, clockOutTime, child) {
-                        return _buildMetricColumn(
-                          "CLOCK OUT",
-                          clockOutTime,
-                          Icons.logout_rounded,
-                          Colors.red,
-                        );
-                      },
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 20),
-
-              // --- Action Buttons ---
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: SizedBox(
-                        height: 54,
-                        child: ElevatedButton.icon(
-                          onPressed: _syncDataToServer,
-                          icon: const Icon(Icons.cloud_sync_rounded, size: 20),
-                          label: const Text(
-                            "SYNC TODAY",
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13,
+                      // Secondary Utility Row
+                      Row(
+                        children: [
+                          Expanded(
+                            child: SizedBox(
+                              height: 44,
+                              child: OutlinedButton.icon(
+                                onPressed: _viewHiveData,
+                                icon: const Icon(Icons.list, size: 18),
+                                label: const Text(
+                                  "VIEW LOGS",
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.blue.shade300,
+                                  side: BorderSide(
+                                    color: Colors.blue.shade600.withOpacity(
+                                      0.4,
+                                    ),
+                                    width: 1.2,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blue.shade600,
-                            foregroundColor: Colors.white,
-                            elevation: 2,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: SizedBox(
+                              height: 44,
+                              child: OutlinedButton.icon(
+                                onPressed: () async {
+                                  await _clearHiveData();
+                                  setState(() {
+                                    _isHiveSummaryLoaded = false;
+                                    _totalSessionsCount = 0;
+                                    _todayLocationsCount = 0;
+                                    _todayLocationsList = [];
+                                  });
+                                },
+                                icon: const Icon(
+                                  Icons.delete_forever_rounded,
+                                  size: 18,
+                                ),
+                                label: const Text(
+                                  "RESET DATA",
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.redAccent.shade100,
+                                  side: BorderSide(
+                                    color: Colors.redAccent.withOpacity(0.4),
+                                    width: 1.2,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
-                        ),
+                        ],
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: SizedBox(
-                        height: 54,
-                        child: OutlinedButton.icon(
-                          onPressed: _viewHiveData,
-                          icon: const Icon(Icons.list, size: 20),
-                          label: const Text(
-                            "VIEW LOGS",
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                            ),
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.blue.shade400,
-                            side: BorderSide(
-                              color: Colors.blue.shade600.withOpacity(0.5),
-                              width: 1.5,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 10),
-
-              // --- Clear Button ---
-              SizedBox(
-                width: double.infinity,
-                child: TextButton.icon(
-                  onPressed: _clearHiveData,
-                  icon: const Icon(
-                    Icons.delete_forever_rounded,
-                    color: Colors.red,
-                    size: 18,
+                    ],
                   ),
-                  label: const Text(
-                    "RESET ALL LOCAL SESSIONS",
-                    style: TextStyle(
-                      color: Colors.red,
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 0.8,
-                    ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInspectorStatCard({
+    required String label,
+    required int count,
+    required IconData icon,
+    required Color glowColor,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F172A).withOpacity(0.4),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withOpacity(0.04)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 16, color: glowColor),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  label.toUpperCase(),
+                  style: const TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white54,
+                    letterSpacing: 0.5,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
           ),
-        ),
+          const SizedBox(height: 8),
+          Text(
+            count.toString(),
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              color: Colors.white,
+              shadows: [
+                Shadow(color: glowColor.withOpacity(0.3), blurRadius: 8),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -825,7 +1092,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             const SizedBox(width: 6),
             Text(
               label,
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 12,
                 color: Colors.white,
                 fontWeight: FontWeight.bold,

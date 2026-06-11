@@ -1,0 +1,61 @@
+✅ Clock In Sync SUCCESS! Sent Payload: {type: in, time: 1779855271830, lat: 37.4219983, long: -122.084}
+I/flutter ( 6753): 📤 Sending Location Chunk to Server (4 items): [{date: 27-05-2026, time: 1779855279374, lat: 37.4219983, long: -122.084}, {date: 27-05-2026, time: 1779855280380, lat: 15.9418, long: 79.6144}, {date: 27-05-2026, time: 1779855285379, lat: 14.9541, long: 77.7034}, {date: 27-05-2026, time: 1779855290381, lat: 16.0612, long: 80.6302}]
+I/flutter ( 6753): ✅ Location Batch Sync SUCCESS! Sent Payload size: 4
+I/flutter ( 6753): 📤 Sending Clock Out Data to Server: {type: out, time: 1779855293454, lat: 37.4219975, long: -122.0839995}
+I/flutter ( 6753): ✅ Clock Out Sync SUCCESS! Sent Payload: {type: out, time: 1779855293454, lat: 37.4219975, long: -122.0839995}
+I/flutter ( 6753): 📤 Sending Clock In Data to Server: {type: in, time: 1779855309129, lat: 37.4219983, long: -122.084}
+I/flutter ( 6753): ✅ Clock In Sync SUCCESS! Sent Payload: {type: in, time: 1779855309129, lat: 37.4219983, long: -122.084}
+I/flutter ( 6753): 📤 Sending Location Chunk to Server (3 items): [{date: 27-05-2026, time: 1779855317507, lat: 37.4219983, long: -122.084}, {date: 27-05-2026, time: 1779855318516, lat: 15.0235, long: 77.279}, {date: 27-05-2026, time: 1779855323514, lat: 13.3919, long: 77.8695}]
+I/flutter ( 6753): ✅ Location Batch Sync SUCCESS! Sent Payload size: 3
+I/flutter ( 6753): 📤 Sending Clock Out Data to Server: {type: out, time: 1779855325581, lat: 37.4219983, long: -122.084}
+I/flutter ( 6753): ✅ Clock Out Sync SUCCESS! Sent Payload: {type: out, time: 1779855325581, lat: 37.4219983, long: -122.084}
+
+
+// testing purpose
+
+I/flutter ( 6181): APICALL _clockInApi Sending Clock In Data to Server: {type: in, time: 1779857352169, lat: 37.4219983, long: -122.084}
+I/flutter ( 6181): APICALL _uploadLocationChunkApi Sending Location Chunk to Server (6 items): [{date: 27-05-2026, time: 1779857359849, lat: 37.4219983, long: -122.084}, {date: 27-05-2026, time: 1779857360902, lat: 13.3187, long: 77.3032}, {date: 27-05-2026, time: 1779857365901, lat: 16.677, long: 81.7952}, {date: 27-05-2026, time: 1779857370901, lat: 16.0847, long: 79.4442}, {date: 27-05-2026, time: 1779857375900, lat: 16.9609, long: 78.8294}, {date: 27-05-2026, time: 1779857380901, lat: 15.076, long: 78.0655}]
+I/flutter ( 6181): APICALL _clockOutApi Sending Clock Out Data to Server: {type: out, time: 1779857385941, lat: 37.4219979, long: -122.0840009}
+I/flutter ( 6181): APICALL _clockInApi Sending Clock In Data to Server: {type: in, time: 1779857405039, lat: 37.4219983, long: -122.084}
+I/flutter ( 6181): APICALL _uploadLocationChunkApi Sending Location Chunk to Server (2 items): [{date: 27-05-2026, time: 1779857413034, lat: 37.4219983, long: -122.084}, {date: 27-05-2026, time: 1779857414056, lat: 14.3605, long: 81.8261}]
+I/flutter ( 6181): APICALL _clockOutApi Sending Clock Out Data to Server: {type: out, time: 1779857416730, lat: 37.4219983, long: -122.084}
+I/flutter ( 6181): APICALL _clockInApi Sending Clock In Data to Server: {type: in, time: 1779943866194, lat: 37.4219983, long: -122.084}
+I/flutter ( 6181): APICALL _uploadLocationChunkApi Sending Location Chunk to Server (3 items): [{date: 28-05-2026, time: 1779943874237, lat: 37.4219983, long: -122.084}, {date: 28-05-2026, time: 1779943875320, lat: 14.5471, long: 80.8424}, {date: 28-05-2026, time: 1779943880313, lat: 16.9376, long: 80.1696}]
+I/flutter ( 6181): APICALL _clockOutApi Sending Clock Out Data to Server: {type: out, time: 1779943883028, lat: 37.4219983, long: -122.084}
+I/flutter ( 6181): APICALL _clockInApi Sending Clock In Data to Server: {type: in, time: 1779943891915, lat: 37.4219983, long: -122.084}
+I/flutter ( 6181): APICALL _uploadLocationChunkApi Sending Location Chunk to Server (2 items): [{date: 28-05-2026, time: 1779943896320, lat: 37.4219977, long: -122.0839993}, {date: 28-05-2026, time: 1779943896957, lat: 13.4237, long: 78.8835}]
+I/flutter ( 6181): APICALL _clockOutApi Sending Clock Out Data to Server: {type: out, time: 1779943897722, lat: 37.4219977, long: -122.0839993}
+
+
+
+1779690808693 
+
+
+not like this 
+[
+"27-05-2026"  : {
+{
+    "date": "27-05-2026", 
+    "time": 1779857359849,
+    "lat": 37.4219983,
+    "long": -122.084
+  },
+  {
+    "date": "27-05-2026", 
+    "time": 1779857359849,
+    "lat": 37.3434,
+    "long": -122.34343
+  },
+},
+  "28-06-2027" : {
+ {
+    "date": "27-05-2026",  
+    "time": 1779857360902,
+    "lat": 13.3187,
+    "long": 77.3032
+  }
+  }
+ 
+]
+
+

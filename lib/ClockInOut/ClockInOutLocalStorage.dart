@@ -5,7 +5,6 @@ class ClockInOutLocalStorage {
   Future<Map<dynamic, dynamic>> getAllClockInOutData() async {
     final box = await Hive.openBox('clokINOutData');
     final data = box.toMap();
-    await box.close();
     return Map<dynamic, dynamic>.from(data);
   }
 
@@ -13,7 +12,6 @@ class ClockInOutLocalStorage {
   Future<Map<dynamic, dynamic>> getAllLocationData() async {
     final box = await Hive.openBox('locationdata');
     final data = box.toMap();
-    await box.close();
     return Map<dynamic, dynamic>.from(data);
   }
 }

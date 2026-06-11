@@ -41,7 +41,6 @@ class ClockInOutServerSyncRepository {
                   } else {
                     await box.put(firstKeyEntry, entries);
                   }
-                  await box.close();
                 }
               } catch (e) {
                 rethrow;
@@ -51,10 +50,12 @@ class ClockInOutServerSyncRepository {
               final timeData =
                   firstValueEntry["time"]; // Check-out epoch timestamp
 
-              if (timeData is int) {
-                final DateTime checkOutTime =
-                    DateTime.fromMillisecondsSinceEpoch(timeData);
+              final DateTime? checkOutTime = _parseTimeToDateTime(
+                firstKeyEntry.toString(),
+                timeData,
+              );
 
+              if (checkOutTime != null) {
                 // Open 'locationdata' box to fetch and filter coordinates
                 final locBox = await Hive.openBox('locationdata');
                 final Map<dynamic, dynamic> allLocs = locBox.toMap();
@@ -74,25 +75,17 @@ class ClockInOutServerSyncRepository {
                     final map = Map<String, dynamic>.from(locEntry);
 
                     try {
-                      DateTime locDateTime;
                       final rawLocTime = map['time'];
-
-                      // High-precision double compatibility check
-                      if (rawLocTime is int) {
-                        locDateTime = DateTime.fromMillisecondsSinceEpoch(
-                          rawLocTime,
-                        );
-                      } else {
-                        final String dateStr = map['date'] ?? '';
-                        final String timeStr = rawLocTime?.toString() ?? '';
-                        locDateTime = DateFormat(
-                          "dd-MM-yyyy hh:mm:ss.SSS a",
-                        ).parse("$dateStr $timeStr");
-                      }
+                      final String dateStr = map['date'] ?? dateKey.toString();
+                      final DateTime? locDateTime = _parseTimeToDateTime(
+                        dateStr,
+                        rawLocTime,
+                      );
 
                       // Check if coordinate was logged before or exactly at check-out
-                      if (locDateTime.isBefore(checkOutTime) ||
-                          locDateTime.isAtSameMomentAs(checkOutTime)) {
+                      if (locDateTime != null &&
+                          (locDateTime.isBefore(checkOutTime) ||
+                              locDateTime.isAtSameMomentAs(checkOutTime))) {
                         syncedLocations.add(map);
                       } else {
                         remainingLocations.add(map);
@@ -123,7 +116,6 @@ class ClockInOutServerSyncRepository {
                     }
                   }
                 }
-                await locBox.close();
               }
 
               // Finally, remove the Clock-Out entry itself from clokINOutData
@@ -138,7 +130,6 @@ class ClockInOutServerSyncRepository {
                   } else {
                     await box.put(firstKeyEntry, entries);
                   }
-                  await box.close();
                 }
               } catch (e) {
                 rethrow;
@@ -154,5 +145,62 @@ class ClockInOutServerSyncRepository {
     } catch (e) {
       rethrow;
     }
+  }
+
+  /// Helper to robustly convert time string formats or integer timestamps to DateTime.
+  DateTime? _parseTimeToDateTime(String dateStr, dynamic timeVal) {
+    if (timeVal is int) {
+      return DateTime.fromMillisecondsSinceEpoch(timeVal);
+    }
+    if (timeVal is String) {
+      final parsedInt = int.tryParse(timeVal);
+      if (parsedInt != null) {
+        return DateTime.fromMillisecondsSinceEpoch(parsedInt);
+      }
+
+      try {
+        final formattedTime = timeVal.trim();
+        DateTime? parsedDate;
+        final formats = [
+          'dd-MM-yyyy hh:mm:ss.SSS a',
+          'dd-MM-yyyy hh:mm:ss a',
+          'dd-MM-yyyy hh:mm a',
+          'hh:mm:ss.SSS a',
+          'hh:mm:ss a',
+          'hh:mm a',
+        ];
+        for (var fmt in formats) {
+          try {
+            if (fmt.contains('dd-MM-yyyy')) {
+              parsedDate = DateFormat(fmt).parse("$dateStr $formattedTime");
+            } else {
+              parsedDate = DateFormat(fmt).parse(formattedTime);
+              if (parsedDate != null) {
+                final dateParts = dateStr.split('-');
+                if (dateParts.length == 3) {
+                  final day = int.parse(dateParts[0]);
+                  final month = int.parse(dateParts[1]);
+                  final year = int.parse(dateParts[2]);
+                  parsedDate = DateTime(
+                    year,
+                    month,
+                    day,
+                    parsedDate.hour,
+                    parsedDate.minute,
+                    parsedDate.second,
+                    parsedDate.millisecond,
+                  );
+                }
+              }
+            }
+            break;
+          } catch (_) {}
+        }
+        return parsedDate;
+      } catch (e) {
+        log("Error parsing time string '$timeVal': $e");
+      }
+    }
+    return null;
   }
 }

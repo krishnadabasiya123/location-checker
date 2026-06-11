@@ -6,7 +6,7 @@ class LocalRepository {
   Future<Map<dynamic, dynamic>> getAllClockInOutData() async {
     final box = Hive.box('clokINOutData');
     final data = box.toMap();
-    await box.close();
+    print("clock in out : $data");
     return Map<dynamic, dynamic>.from(data);
   }
 
@@ -14,7 +14,6 @@ class LocalRepository {
   Future<Map<dynamic, dynamic>> getAllLocationData() async {
     final box = Hive.box('locationdata');
     final data = box.toMap();
-    await box.close();
     return Map<dynamic, dynamic>.from(data);
   }
 
@@ -97,10 +96,34 @@ class LocalRepository {
 
       if (entry["type"] == "in") {
         // call clock in API
-
+        try {
+          if (hasInternet) {
+            // Simulate successful API call when online
+            apiSuccess = true;
+            print("🟢 Clock In API Successful (Online Mode): $entry");
+          } else {
+            // Force save to Hive when offline by throwing an exception
+            throw Exception("No internet connection");
+          }
+        } catch (e) {
+          apiSuccess = false;
+          final box = Hive.box('clokINOutData');
+          final List<dynamic> todayEntries = List<dynamic>.from(
+            box.get(date) ?? [],
+          );
+          todayEntries.add(entry);
+          await box.put(date, todayEntries);
+          print("Saved Clock In offline to Hive: $entry due to: $e");
+        }
+      } else {
+        // call clock out API
         try {
           if (hasInternet) {
             apiSuccess = true;
+            print("🟢 Clock Out API Successful (Online Mode): $entry");
+          } else {
+            // Force save to Hive when offline by throwing an exception
+            throw Exception("No internet connection");
           }
           // api call sucess
         } catch (e) {
@@ -111,41 +134,12 @@ class LocalRepository {
           );
           todayEntries.add(entry);
           await box.put(date, todayEntries);
-
-          // if api not sucess keep data into hive
-        }
-      } else {
-        // call clock out API
-
-        try {
-          if (hasInternet) {
-            apiSuccess = true;
-
-            // if data available in hive then send first that data
-            // 500 batch data pass (if data is 500 or more than then 500 chunck data send to server)
-            // when api fail to sync that 500 data keep in hive
-            // send current come clout out data to server
-          }
-          // api call sucess
-        } catch (e) {
-          // if api not sucess keep data into hive
-          // location date and clock out data
+          print("Saved Clock Out offline to Hive: $entry due to: $e");
         }
       }
     } catch (e) {
       print("Save Error $e");
     }
-  }
-
-  /// GET TODAY DATA
-  Future<List<dynamic>> getTodayData(String date) async {
-    final box = await Hive.openBox('clokINOutData');
-
-    final List<dynamic> data = List<dynamic>.from(box.get(date) ?? []);
-
-    await box.close();
-
-    return data;
   }
 
   // sync to serve data (500 batch data pass 500 data)
